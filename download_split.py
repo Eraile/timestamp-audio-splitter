@@ -7,8 +7,8 @@ Timestamps are auto-fetched from YouTube chapters or the video description.
 Generates a VLC-compatible M3U playlist.
 
 Requirements:
-  - yt-dlp  (pip install yt-dlp)
-  - ffmpeg  (must be in PATH)
+  - yt-dlp  (pip install yt-dlp  — bundled automatically in the .exe build)
+  - ffmpeg  (must be in PATH — auto-installed via winget when running as .exe)
 
 Usage:
   python download_split.py --url "https://..."
@@ -18,17 +18,23 @@ Usage:
 """
 
 import sys
+import os
 import re
-import json
 import subprocess
 import argparse
 from pathlib import Path
+
+# Ensure UTF-8 output (needed when running as a standalone exe on Windows)
+if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+import yt_dlp
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_URL    = "https://www.youtube.com/watch?v=Nr82n2P-IDA"
 DEFAULT_FORMAT  = "mp3"
 DEFAULT_BITRATE = 320
 BAR_WIDTH       = 28
@@ -37,31 +43,98 @@ BAR_WIDTH       = 28
 # Helpers
 # ---------------------------------------------------------------------------
 
-def check_dependencies(need_ffmpeg: bool = True):
-    tools = ["yt-dlp", "ffmpeg"] if need_ffmpeg else ["yt-dlp"]
-    missing = []
-    for tool in tools:
-        try:
-            subprocess.run([tool, "--version"], capture_output=True, check=True)
-        except (FileNotFoundError, subprocess.CalledProcessError):
-            missing.append(tool)
-    if missing:
-        print(f"[ERROR] Missing tools: {', '.join(missing)}")
-        print("  yt-dlp : pip install yt-dlp")
-        print("  ffmpeg : https://ffmpeg.org/download.html")
-        sys.exit(1)
+def _ffmpeg_in_path() -> bool:
+    try:
+        subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
+        return True
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return False
+
+
+def _reload_path_from_registry():
+    """Reload PATH from Windows registry to pick up freshly installed tools."""
+    try:
+        import winreg
+        paths = []
+        for hive, subkey in [
+            (winreg.HKEY_LOCAL_MACHINE,
+             r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
+            (winreg.HKEY_CURRENT_USER, r"Environment"),
+        ]:
+            try:
+                with winreg.OpenKey(hive, subkey) as key:
+                    value, _ = winreg.QueryValueEx(key, "Path")
+                    paths.append(value)
+            except OSError:
+                pass
+        if paths:
+            os.environ["PATH"] = ";".join(paths)
+    except ImportError:
+        pass  # Not on Windows
+
+
+def ensure_ffmpeg() -> bool:
+    """Check for ffmpeg; auto-install via winget if missing. Returns True if ready."""
+    if _ffmpeg_in_path():
+        return True
+    print("\n  [!] ffmpeg not found. Attempting automatic install via winget...", flush=True)
+    result = subprocess.run(
+        ["winget", "install", "--id", "Gyan.FFmpeg", "-e",
+         "--accept-source-agreements", "--accept-package-agreements"],
+    )
+    _reload_path_from_registry()
+    if _ffmpeg_in_path():
+        print("  [OK] ffmpeg installed and ready.", flush=True)
+        return True
+    print("\n  [ERROR] Could not find or install ffmpeg automatically.")
+    print("  Please install manually and ensure it is in your PATH:")
+    print("    winget install Gyan.FFmpeg")
+    print("    or: https://ffmpeg.org/download.html")
+    return False
 
 
 def parse_timestamps(text: str) -> list[dict]:
-    """Parse 'MM:SS Title' or 'H:MM:SS Title' lines from any text block."""
-    pattern = re.compile(r"^(\d{1,2}:\d{2}(?::\d{2})?)\s+(.+)$", re.MULTILINE)
-    tracks = []
-    for time_str, title in pattern.findall(text):
-        parts = list(map(int, time_str.split(":")))
-        seconds = parts[0] * 60 + parts[1] if len(parts) == 2 \
-                  else parts[0] * 3600 + parts[1] * 60 + parts[2]
-        tracks.append({"time": seconds, "title": title.strip()})
-    return tracks
+    """Parse timestamp lines from any text block.
+
+    The timestamp (MM:SS or H:MM:SS) may appear at the start or end of a
+    line, optionally wrapped in brackets [ ] or ( ).  Any separator
+    characters (-, |, –, —, etc.) adjacent to the timestamp are stripped.
+    Lines with no title text are labeled 'Track N'.
+    """
+    TIME_PAT = r"\d{1,2}:\d{2}(?::\d{2})?"
+    SEP      = r"[\s\-|–—•·]*"
+
+    # Format A: [timestamp] SEP title  (timestamp at start of line)
+    pat_a = re.compile(rf"^[\[(]?({TIME_PAT})[\])]?{SEP}(.*)$", re.MULTILINE)
+    # Format B: title SEP [timestamp]  (timestamp at end of line)
+    pat_b = re.compile(rf"^(.*?){SEP}[\[(]?({TIME_PAT})[\])]?\s*$", re.MULTILINE)
+
+    def to_seconds(s: str) -> int:
+        parts = list(map(int, s.split(":")))
+        return parts[0] * 60 + parts[1] if len(parts) == 2 \
+               else parts[0] * 3600 + parts[1] * 60 + parts[2]
+
+    def _extract(matches, time_grp: int, title_grp: int) -> list[dict]:
+        seen: set[int] = set()
+        tracks = []
+        n = 0
+        for m in matches:
+            secs = to_seconds(m.group(time_grp))
+            if secs in seen:
+                continue
+            seen.add(secs)
+            title = re.sub(rf"^{SEP}|{SEP}$", "", m.group(title_grp)).strip()
+            n += 1
+            tracks.append({"time": secs, "title": title or f"Track {n}"})
+        tracks.sort(key=lambda x: x["time"])
+        return tracks
+
+    matches_a = list(pat_a.finditer(text))
+    matches_b = list(pat_b.finditer(text))
+
+    if len(matches_b) > len(matches_a):
+        return _extract(matches_b, time_grp=2, title_grp=1)
+    return _extract(matches_a, time_grp=1, title_grp=2)
 
 
 def sanitize_filename(name: str) -> str:
@@ -91,12 +164,10 @@ def progress_bar(current: int, total: int) -> str:
 # ---------------------------------------------------------------------------
 
 def fetch_video_info(url: str) -> dict:
-    """Fetch full video metadata (no download) via yt-dlp --dump-json."""
-    result = subprocess.run(
-        ["yt-dlp", "--dump-json", "--no-playlist", url],
-        capture_output=True, text=True, check=True
-    )
-    return json.loads(result.stdout)
+    """Fetch full video metadata (no download) via yt_dlp Python module."""
+    ydl_opts = {"quiet": True, "no_warnings": True, "noplaylist": True}
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        return ydl.extract_info(url, download=False)
 
 
 def extract_tracks(info: dict) -> list[dict]:
@@ -120,7 +191,7 @@ def cmd_show_info(url: str):
     print("  Fetching video info...\n", flush=True)
     try:
         info = fetch_video_info(url)
-    except subprocess.CalledProcessError:
+    except Exception:
         print("[ERROR] Could not access the video. Check the URL and your connection.")
         sys.exit(1)
 
@@ -158,11 +229,13 @@ def cmd_show_info(url: str):
 
 def download_audio(url: str, dest: Path) -> Path:
     print("\n  [1/3] Downloading audio...\n", flush=True)
-    output_template = str(dest / "raw_audio.%(ext)s")
-    subprocess.run(
-        ["yt-dlp", "-f", "bestaudio", "--no-playlist", "-o", output_template, url],
-        check=True,
-    )
+    ydl_opts = {
+        "format": "bestaudio",
+        "outtmpl": str(dest / "raw_audio.%(ext)s"),
+        "noplaylist": True,
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
     candidates = sorted(dest.glob("raw_audio.*"))
     if not candidates:
         print("[ERROR] Download failed.")
@@ -235,6 +308,125 @@ def print_recap(files: list[Path], playlist_path: Path, fmt: str, bitrate: int):
 
 
 # ---------------------------------------------------------------------------
+# Interactive mode  (no arguments — user double-clicked the exe)
+# ---------------------------------------------------------------------------
+
+def interactive_mode():
+    """Full interactive CLI: ask URL, show track list, ask options, confirm, run."""
+    sep  = "  " + "─" * 62
+    sep2 = "  " + "═" * 62
+
+    print()
+    print(sep2)
+    print("   YouTube Audio Downloader & Splitter")
+    print(sep2)
+    print()
+
+    # ── URL ──────────────────────────────────────────────────────────────
+    while True:
+        url = input("  YouTube URL : ").strip()
+        if url:
+            break
+        print("  [!] Please enter a URL.")
+
+    # ── Fetch info + show track list ─────────────────────────────────────
+    print()
+    print("  Fetching video info...", flush=True)
+    try:
+        info = fetch_video_info(url)
+    except Exception:
+        print("  [ERROR] Could not access the video. Check the URL and your connection.")
+        input("\n  Press Enter to exit.")
+        sys.exit(1)
+
+    title    = info.get("title", "Unknown")
+    slug     = slug_from_title(title)
+    duration = int(info.get("duration") or 0)
+    tracks   = extract_tracks(info)
+
+    print()
+    print(f"  Title    : {title}")
+    print(f"  Duration : {seconds_to_hms(duration)}")
+    print()
+
+    if not tracks:
+        print("  [!] No timestamps found in chapters or description.")
+        input("\n  Press Enter to exit.")
+        sys.exit(1)
+
+    print(f"  {len(tracks)} tracks found:")
+    print(sep)
+    for i, t in enumerate(tracks):
+        end_t  = tracks[i + 1]["time"] if i + 1 < len(tracks) else duration
+        dur_s  = end_t - t["time"]
+        start_fmt = f"{t['time'] // 60:02d}:{t['time'] % 60:02d}"
+        dur_fmt   = f"{dur_s // 60:02d}:{dur_s % 60:02d}"
+        print(f"  {i + 1:02d}.  {start_fmt}  ({dur_fmt})  {t['title']}")
+    print(sep)
+    print()
+
+    # ── Output folder ─────────────────────────────────────────────────────
+    print(f"  Suggested folder name : {slug}")
+    subfolder = input("  Output folder (Enter = use suggestion) : ").strip()
+    if not subfolder:
+        subfolder = slug
+    output_dir = Path(subfolder)
+
+    # ── Format ────────────────────────────────────────────────────────────
+    print()
+    print("  Audio format:")
+    print("    [1]  MP3  (recommended)")
+    print("    [2]  OGG  (open format)")
+    fmt_choice = input("  Choice [1/2] (Enter = MP3) : ").strip()
+    fmt = "ogg" if fmt_choice == "2" else "mp3"
+
+    # ── Quality ───────────────────────────────────────────────────────────
+    print()
+    print("  Audio quality:")
+    print("    [1]  320 kbps  (recommended)")
+    print("    [2]  192 kbps")
+    print("    [3]  128 kbps")
+    print("    [4]   96 kbps")
+    q_choice = input("  Choice [1-4] (Enter = 320 kbps) : ").strip()
+    bitrate_map = {"2": 192, "3": 128, "4": 96}
+    bitrate = bitrate_map.get(q_choice, 320)
+
+    # ── Confirm ───────────────────────────────────────────────────────────
+    print()
+    print(sep)
+    print(f"  URL     : {url}")
+    print(f"  Output  : {output_dir.resolve()}")
+    print(f"  Format  : {fmt.upper()} @ {bitrate} kbps")
+    print(f"  Tracks  : {len(tracks)}")
+    print(sep)
+    print()
+    confirm = input("  Start download? [Y/n] : ").strip().lower()
+    if confirm == "n":
+        print("  Cancelled.")
+        input("\n  Press Enter to exit.")
+        sys.exit(0)
+
+    # ── ffmpeg ────────────────────────────────────────────────────────────
+    if not ensure_ffmpeg():
+        input("\n  Press Enter to exit.")
+        sys.exit(1)
+
+    # ── Run ───────────────────────────────────────────────────────────────
+    output_dir.mkdir(parents=True, exist_ok=True)
+    raw_file    = download_audio(url, output_dir)
+    track_files = split_audio(raw_file, tracks, output_dir,
+                               fmt=fmt, bitrate=bitrate, duration=duration)
+    raw_file.unlink(missing_ok=True)
+
+    print("  [3/3] Creating VLC playlist...")
+    playlist_path = output_dir / "playlist.m3u"
+    create_m3u_playlist(track_files, playlist_path)
+    print_recap(track_files, playlist_path, fmt, bitrate)
+
+    input("  Press Enter to exit.")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -242,7 +434,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Download and split a YouTube video into individual audio tracks."
     )
-    parser.add_argument("--url",        default=DEFAULT_URL)
+    parser.add_argument("--url",        default=None)
     parser.add_argument("--format",     choices=["mp3", "ogg"], default=DEFAULT_FORMAT)
     parser.add_argument("--output",     default=None, help="Output directory")
     parser.add_argument("--timestamps", default=None,
@@ -255,18 +447,31 @@ def main():
                         help="Skip dependency check (used when called from launcher.bat)")
     args = parser.parse_args()
 
-    if not args.no_dep_check:
-        check_dependencies(need_ffmpeg=not args.show_info)
+    # No arguments at all → interactive mode (user double-clicked the exe)
+    if args.url is None and not args.show_info:
+        interactive_mode()
+        return
+
+    if not args.no_dep_check and not args.show_info:
+        if not ensure_ffmpeg():
+            sys.exit(1)
 
     if args.show_info:
+        if not args.url:
+            print("[ERROR] --show-info requires --url")
+            sys.exit(1)
         cmd_show_info(args.url)
         return
+
+    if not args.url:
+        print("[ERROR] --url is required when using CLI flags.")
+        sys.exit(1)
 
     # ── Fetch metadata ─────────────────────────────────────────────────────
     print("\n  Fetching metadata...", flush=True)
     try:
         info = fetch_video_info(args.url)
-    except subprocess.CalledProcessError:
+    except Exception:
         print("[ERROR] Could not access the video.")
         sys.exit(1)
 

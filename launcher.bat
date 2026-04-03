@@ -13,7 +13,7 @@ setlocal enabledelayedexpansion
 set "SCRIPT_DIR=%~dp0"
 set "CONFIG_FILE=%SCRIPT_DIR%config.ini"
 set "PY_SCRIPT=%SCRIPT_DIR%download_split.py"
-set "EXE_PATH=%SCRIPT_DIR%dist\ytdl-splitter.exe"
+set "EXE_PATH=%SCRIPT_DIR%dist\youtube-to-playlist.exe"
 set "DEFAULT_URL=https://www.youtube.com/watch?v=Nr82n2P-IDA"
 set "PYTHONUTF8=1"
 
