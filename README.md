@@ -24,13 +24,17 @@ available. No manual editing required.
 
 ## Quick Start (Windows)
 
-Just double-click `launcher.bat`.
+Run the provided .exe in the Release section of Github.
 
-It will: 1. Check for Python, yt-dlp, and ffmpeg --- and offer to
-install any that are missing 2. Ask for a video/audio URL 3. Preview the
-track list extracted from available metadata 4. Let you choose the
-output folder, format, and quality 5. Download and split everything
-automatically
+Or, just double-click `launcher.bat`.
+
+It will: 
+1. Check for Python, yt-dlp, and ffmpeg 
+> --- and offer to install any that are missing 
+2. Ask for a video/audio URL 
+3. Preview the track list extracted from available metadata 
+4. Let you choose the output folder, format, and quality 
+5. Download and split everything automatically
 
 > **Note:** ffmpeg is installed via `winget` (Windows 10/11) or
 > Chocolatey if not already present.
