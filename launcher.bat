@@ -3,7 +3,7 @@ chcp 65001 >nul
 setlocal enabledelayedexpansion
 
 :: ============================================================
-::  YouTube Audio Downloader & Splitter — Launcher  v2.0
+::  Audio Downloader & Splitter — Launcher  v2.0
 :: ============================================================
 ::  - Timestamps auto-fetched from YouTube (chapters / desc)
 ::  - Output folder suggested from video title
@@ -13,8 +13,8 @@ setlocal enabledelayedexpansion
 set "SCRIPT_DIR=%~dp0"
 set "CONFIG_FILE=%SCRIPT_DIR%config.ini"
 set "PY_SCRIPT=%SCRIPT_DIR%download_split.py"
-set "EXE_PATH=%SCRIPT_DIR%dist\youtube-to-playlist.exe"
-set "DEFAULT_URL=https://www.youtube.com/watch?v=Nr82n2P-IDA"
+set "EXE_PATH=%SCRIPT_DIR%dist\timestamp-audio-splitter.exe.exe"
+set "DEFAULT_URL="
 set "PYTHONUTF8=1"
 
 :: Auto-detect compiled exe vs python script
@@ -43,7 +43,7 @@ if "%BASE_FOLDER%"=="" set "BASE_FOLDER=%SCRIPT_DIR%output"
 cls
 echo.
 echo  ╔═══════════════════════════════════════════════╗
-echo  ║   YouTube Audio Downloader ^& Splitter  v2.0   ║
+echo  ║   Audio Downloader ^& Splitter  v2.0   ║
 echo  ╚═══════════════════════════════════════════════╝
 echo.
 echo   Base folder : %BASE_FOLDER%
@@ -85,7 +85,7 @@ echo.
 :: ── URL ───────────────────────────────────────────────────────────────────
 echo   Default URL : %DEFAULT_URL%
 echo.
-set /p "URL=  YouTube URL (Enter = use default) : "
+set /p "URL=  Audio or Playlist URL (Enter = use default) : "
 if "%URL%"=="" set "URL=%DEFAULT_URL%"
 
 :: ── Fetch video info (title + tracks) ─────────────────────────────────────

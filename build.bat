@@ -12,7 +12,7 @@ set "PY_SCRIPT=%SCRIPT_DIR%download_split.py"
 
 echo.
 echo  ╔═══════════════════════════════════════════════╗
-echo  ║   Build : youtube-to-playlist.exe  (PyInstaller)  ║
+echo  ║   Build : timestamp-audio-splitter.exe  (PyInstaller)  ║
 echo  ╚═══════════════════════════════════════════════╝
 echo.
 
@@ -60,13 +60,13 @@ if not exist "%PY_SCRIPT%" (
 echo.
 echo  ┌─ Building ──────────────────────────────────────────────────────────┐
 echo  │  Source  : download_split.py                                        │
-echo  │  Output  : dist\youtube-to-playlist.exe                                │
+echo  │  Output  : dist\timestamp-audio-splitter.exe                                │
 echo  │  Mode    : --onefile  (single executable, no extra files)           │
 echo  └─────────────────────────────────────────────────────────────────────┘
 echo.
 
 pushd "%SCRIPT_DIR%"
-python -m PyInstaller --onefile --name youtube-to-playlist --console "%PY_SCRIPT%"
+python -m PyInstaller --onefile --name timestamp-audio-splitter --console "%PY_SCRIPT%"
 if errorlevel 1 (
     popd
     echo.
@@ -77,10 +77,10 @@ popd
 
 :: ── Result ───────────────────────────────────────────────
 echo.
-if exist "%SCRIPT_DIR%dist\youtube-to-playlist.exe" (
+if exist "%SCRIPT_DIR%dist\timestamp-audio-splitter.exe" (
     echo  ┌─ Build successful ──────────────────────────────────────────────────┐
     echo  │                                                                      │
-    echo  │   dist\youtube-to-playlist.exe  is ready.                             │
+    echo  │   dist\timestamp-audio-splitter.exe  is ready.                             │
     echo  │                                                                      │
     echo  │   To distribute without Python:                                     │
     echo  │     copy  launcher.bat  +  dist\ytdl-splitter.exe                   │
