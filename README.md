@@ -192,7 +192,7 @@ URL
 ## Project Structure
 
 ```
-youtube_download_playlist/
+timestamp-audio-splitter/
 ├── download_split.py     # Core engine (download + split + playlist)
 ├── launcher.bat          # Interactive Windows launcher
 ├── build.bat             # PyInstaller build script
